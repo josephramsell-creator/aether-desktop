@@ -1,7 +1,7 @@
-Aether 2.0.0
+Aether 2.0.1
 ============
 
-Already have v1?
+Already have v1 or broken v2?
   Use Aether-v2-patch.zip — unzip, run APPLY-v2.bat, start Aether.exe.
   That overwrites the studio inside your current folder.
 
@@ -12,7 +12,10 @@ Fresh copy?
 If you already edited readings, keep a copy of data\content.
 The patch will not overwrite aether-production.xlsx when that file exists.
 
-What is new
+v2.0.1
+- Restores the control UI (v2.0.0 opened as an unstyled text dump)
+
+v2
 - Production workbook (date, sign, reading, music, voice, font)
 - Edit the reading and Save to workbook
 - Medallion, layout, and typewriter are unchanged

@@ -1,11 +1,13 @@
-Aether for Windows — v2.0.0
+Aether for Windows — v2.0.1
 
 Full install:
-https://github.com/josephramsell-creator/aether-desktop/releases/download/v2.0.0/Aether-Windows-x64.zip
+https://github.com/josephramsell-creator/aether-desktop/releases/download/v2.0.1/Aether-Windows-x64.zip
 
-Update patch (already have v1):
-https://github.com/josephramsell-creator/aether-desktop/releases/download/v2.0.0/Aether-v2-patch.zip
+Update patch (already have v1 or a broken v2):
+https://github.com/josephramsell-creator/aether-desktop/releases/download/v2.0.1/Aether-v2-patch.zip
 
 Unzip the full pack and run Aether.exe.
 Or unzip the patch, run APPLY-v2.bat in your existing Aether folder.
 The patch does not overwrite aether-production.xlsx if that file already exists.
+
+v2.0.1 restores the studio layout. v2.0.0 opened as an unstyled text dump.
