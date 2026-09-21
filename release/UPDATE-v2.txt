@@ -1,0 +1,15 @@
+Aether 2.0.0 — replace v1
+=========================
+
+1. Close Aether.
+2. Unzip Aether-Windows-x64.zip to a new folder (recommended)
+   or overwrite your existing Aether folder.
+3. If you already edited readings, copy your old
+   data/content/aether-production.xlsx into the new folder
+   after unzipping.
+4. Run Aether.exe.
+
+What is new
+- Production workbook (date, sign, reading, music, voice, font)
+- Edit the reading and Save to workbook
+- Medallion, layout, and typewriter are unchanged

@@ -1,0 +1,32 @@
+Aether — local folders
+======================
+
+You can replace these files without rebuilding Aether. Restart the app after changing them.
+
+data/content/aether-production.xlsx
+    Canonical workbook. One row per video on the Readings sheet.
+    Columns Aether uses: date, sign, reading, plus music, voice, font,
+    font_size, text_color, typewriter speed, lenses, status.
+    Save in the studio writes the reading (and lens columns) back into this file.
+
+data/content/aether-production.template.xlsx
+    Empty starter workbook with the same sheets.
+
+data/content/horoscopes.csv
+    Legacy wide CSV. Still accepted.
+
+data/assets/horoscope/background.png
+    Shared vertical frame.
+
+data/assets/horoscope/badges/
+    One circular badge per sign.
+
+data/music/
+    Optional audio beds named after Catalog ids, e.g. ambient-gold.mp3.
+    Videos still render if a track is missing.
+
+data/config/
+    Saved region positions and column mapping.
+
+output/review/
+    Finished videos, grouped by date.
