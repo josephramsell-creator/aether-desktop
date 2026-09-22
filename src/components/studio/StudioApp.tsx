@@ -14,6 +14,8 @@ import {
   loadPersistedMapping,
   savePersistedLayout,
 } from "@/engine/persist";
+import { type ZodiacSign } from "@/templates/horoscope/signs";
+import { installSignPersistence } from "@/engine/persist";
 import { useStudio } from "@/store/studio";
 import { PreviewStage } from "./PreviewStage";
 import { Controls } from "./Controls";
@@ -42,8 +44,66 @@ export function StudioApp() {
     }
   }, []);
 
+  useEffect(() => installSignPersistence(), []);
+
   useEffect(() => {
     installBatchHost();
+  }, []);
+
+  useEffect(() => {
+    const w = window as Window & {
+      aetherControl?: {
+        getSigns: () => { selected: string | null; signs: Record<ZodiacSign, boolean> };
+        setSign: (sign: ZodiacSign, enabled: boolean) => { selected: string | null; signs: Record<ZodiacSign, boolean> };
+        selectSign: (sign: ZodiacSign) => { selected: string | null; signs: Record<ZodiacSign, boolean> };
+        getLayout: () => { titleY: number | null; dateLineY: number | null; readingY: number };
+        setLayout: (patch: { titleY?: number; dateLineY?: number; readingY?: number }) => Promise<{
+          titleY: number | null; dateLineY: number | null; readingY: number;
+        }>;
+      };
+    };
+    const getLayout = () => {
+      const current = useStudio.getState().template;
+      return {
+        titleY: current.title?.region.y ?? null,
+        dateLineY: current.subtitle?.region.y ?? null,
+        readingY: current.textRegion.y,
+      };
+    };
+    const getSigns = () => {
+      const state = useStudio.getState();
+      return {
+        selected: state.items.find((item) => item.id === state.selectedId)?.channel ?? null,
+        signs: { ...state.enabledSigns },
+      };
+    };
+    w.aetherControl = {
+      getSigns,
+      setSign: (sign, enabled) => { useStudio.getState().setSign(sign, enabled); return getSigns(); },
+      selectSign: (sign) => { useStudio.getState().selectSign(sign); return getSigns(); },
+      getLayout,
+      setLayout: async (patch) => {
+        const state = useStudio.getState();
+        const current = state.template;
+        state.patchTemplate({
+          ...(typeof patch.titleY === "number" && current.title
+            ? { title: { ...current.title, region: { ...current.title.region, y: patch.titleY } } }
+            : {}),
+          ...(typeof patch.dateLineY === "number" && current.subtitle
+            ? { subtitle: { ...current.subtitle, region: { ...current.subtitle.region, y: patch.dateLineY } } }
+            : {}),
+          ...(typeof patch.readingY === "number"
+            ? { textRegion: { ...current.textRegion, y: patch.readingY } }
+            : {}),
+        });
+        const next = useStudio.getState();
+        await savePersistedLayout(next.template, next.showGuides);
+        return getLayout();
+      },
+    };
+    return () => {
+      delete w.aetherControl;
+    };
   }, []);
 
   useEffect(() => {

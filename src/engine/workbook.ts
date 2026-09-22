@@ -426,6 +426,8 @@ export function updateWorkbookReading(
   const { headers, body, index: headerIndex } = headerRowFrom(table);
   const col = (label?: string) => (label ? headers.findIndex((header) => header === label) : -1);
   const lenses = splitLenses(reading);
+  const titleIdx = findHeader(headers, ["title", "headline"]);
+  const subtitleIdx = findHeader(headers, ["subtitle", "subhead"]);
   const lensIdx = {
     intro: findHeader(headers, ["intro", "lede", "opening"]),
     money: findHeader(headers, ["money"]),
@@ -440,6 +442,8 @@ export function updateWorkbookReading(
     if (lensIdx.love >= 0 && lenses.love) writeCell(sheet, sheetRow, lensIdx.love, lenses.love);
     if (lensIdx.work >= 0 && lenses.work) writeCell(sheet, sheetRow, lensIdx.work, lenses.work);
     if (lensIdx.caution >= 0 && lenses.caution) writeCell(sheet, sheetRow, lensIdx.caution, lenses.caution);
+    if (titleIdx >= 0) writeCell(sheet, sheetRow, titleIdx, item.title ?? "");
+    if (subtitleIdx >= 0) writeCell(sheet, sheetRow, subtitleIdx, item.subtitle ?? "");
   };
 
   let written = false;
@@ -477,8 +481,8 @@ export function updateWorkbookReading(
       writeCell(sheet, sheetRow, dateIdx, item.date ?? "");
       writeCell(sheet, sheetRow, signIdx, item.channel);
       writeCell(sheet, sheetRow, readingIdx, reading);
-      const titleIdx = findHeader(headers, ["title", "headline"]);
       if (titleIdx >= 0) writeCell(sheet, sheetRow, titleIdx, item.title ?? item.channel.toUpperCase());
+      if (subtitleIdx >= 0) writeCell(sheet, sheetRow, subtitleIdx, item.subtitle ?? "");
       applyLenses(sheetRow);
       written = true;
     }

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ContentItem, LogEntry, TemplateConfig, ValidationIssue, WorkbookMapping } from "@/engine/types";
 import { createHoroscopeTemplate } from "@/templates/horoscope/template";
 import { DEFAULT_WORKBOOK_MAPPING } from "@/engine/production";
+import { ZODIAC_SIGNS, type ZodiacSign } from "@/templates/horoscope/signs";
 import seed from "@/data/aether-production.json";
 
 export type StudioTab = "layout" | "type" | "output" | "log";
@@ -19,6 +20,9 @@ interface StudioStore {
   items: ContentItem[];
   dates: string[];
   selectedId: string | null;
+  enabledSigns: Record<ZodiacSign, boolean>;
+  setSign: (sign: ZodiacSign, enabled: boolean) => void;
+  selectSign: (sign: ZodiacSign) => void;
   showGuides: boolean;
   playing: boolean;
   playhead: number;
@@ -63,11 +67,24 @@ const preferredId =
   seedItems[0]?.id ??
   null;
 
-export const useStudio = create<StudioStore>((set) => ({
+export const useStudio = create<StudioStore>((set, get) => ({
   template: createHoroscopeTemplate(),
   items: seedItems,
   dates: seedDates,
   selectedId: preferredId,
+  enabledSigns: Object.fromEntries(ZODIAC_SIGNS.map((sign) => [sign, true])) as Record<ZodiacSign, boolean>,
+  setSign: (sign, enabled) => {
+    if (!ZODIAC_SIGNS.includes(sign) || typeof enabled !== "boolean") throw new Error("Expected a zodiac sign and boolean enabled state.");
+    set((state) => ({ enabledSigns: { ...state.enabledSigns, [sign]: enabled } }));
+  },
+  selectSign: (sign) => {
+    if (!ZODIAC_SIGNS.includes(sign)) throw new Error(`Unknown zodiac sign: ${sign}`);
+    const state = get();
+    const date = state.items.find((item) => item.id === state.selectedId)?.date ?? state.dates[0];
+    const item = state.items.find((item) => item.date === date && item.channel === sign);
+    if (!item) throw new Error(`${date ?? "Selected date"} has no ${sign} reading.`);
+    state.select(item.id);
+  },
   showGuides: true,
   playing: false,
   playhead: 0,
@@ -161,4 +178,12 @@ export const useStudio = create<StudioStore>((set) => ({
 export function selectedItem(): ContentItem | undefined {
   const { items, selectedId } = useStudio.getState();
   return items.find((item) => item.id === selectedId);
+}
+
+// Shared by the visible Render All action and the existing date batch host.
+export function enabledItemsForDate(date: string): ContentItem[] {
+  const { items, enabledSigns } = useStudio.getState();
+  return ZODIAC_SIGNS.filter((sign) => enabledSigns[sign]).flatMap((sign) =>
+    items.filter((item) => item.date === date && item.channel === sign),
+  );
 }

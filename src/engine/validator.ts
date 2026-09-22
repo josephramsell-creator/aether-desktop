@@ -44,6 +44,7 @@ export function validateDay(
   template: TemplateConfig,
   measure: MeasureFn | null,
   limits: LimitsConfig = DEFAULT_LIMITS,
+  requiredSigns: readonly (typeof ZODIAC_SIGNS)[number][] = ZODIAC_SIGNS,
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
   if (!date) {
@@ -60,7 +61,7 @@ export function validateDay(
 
   const day = items.filter((item) => item.date === date);
   const seen = new Map<string, string>();
-  for (const sign of ZODIAC_SIGNS) {
+  for (const sign of requiredSigns) {
     const matches = day.filter((item) => item.channel === sign);
     if (matches.length === 0) {
       issues.push({

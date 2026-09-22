@@ -11,12 +11,14 @@ import { blockingErrors, validateDay } from "@/engine/validator";
 import { createCanvasMeasurer } from "@/engine/layout";
 import type { SheetPreview, WorkbookMapping } from "@/engine/types";
 import { SIGN_GLYPH, ZODIAC_SIGNS } from "@/templates/horoscope/signs";
-import { useStudio } from "@/store/studio";
+import { enabledItemsForDate, useStudio } from "@/store/studio";
 import { cn } from "@/lib/utils";
 import { musicSrc, splitLenses } from "@/engine/production";
 import { WorkbookMapper } from "./WorkbookMapper";
 
 export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
+  const enabledSigns = useStudio((s) => s.enabledSigns);
+  const enabled = ZODIAC_SIGNS.filter((sign) => enabledSigns[sign]);
   const items = useStudio((s) => s.items);
   const dates = useStudio((s) => s.dates);
   const selectedId = useStudio((s) => s.selectedId);
@@ -33,12 +35,20 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
   const workbookRef = useRef<{ name: string; data: ArrayBuffer; sheets: SheetPreview[] } | null>(null);
   const [mapperOpen, setMapperOpen] = useState(false);
   const [draft, setDraft] = useState(item?.body ?? "");
+  const [titleDraft, setTitleDraft] = useState(item?.title ?? "");
+  const [subtitleDraft, setSubtitleDraft] = useState(item?.subtitle ?? "");
   const [savedBody, setSavedBody] = useState(item?.body ?? "");
+  const [savedTitle, setSavedTitle] = useState(item?.title ?? "");
+  const [savedSubtitle, setSavedSubtitle] = useState(item?.subtitle ?? "");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setDraft(item?.body ?? "");
+    setTitleDraft(item?.title ?? "");
+    setSubtitleDraft(item?.subtitle ?? "");
     setSavedBody(item?.body ?? "");
+    setSavedTitle(item?.title ?? "");
+    setSavedSubtitle(item?.subtitle ?? "");
   }, [item?.id, sourceName]);
 
   const dayItems = useMemo(
@@ -119,16 +129,17 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
 
   async function renderSelection(all: boolean) {
     if (!date) return;
-    const blocked = blockingErrors(dayIssues);
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const measure = ctx ? createCanvasMeasurer(ctx, template.textTypography) : null;
+    const blocked = blockingErrors(validateDay(items, date, template, measure, undefined, enabled));
     if (all && blocked.length) {
-      toast.error("Fix the flagged readings before rendering the full day.");
+      toast.error("Fix the flagged readings before rendering enabled signs.");
       useStudio.getState().setTab("output");
       return;
     }
     const jobs = all
-      ? ZODIAC_SIGNS.map((sign) => dayItems.find((entry) => entry.channel === sign)).filter(
-          (entry): entry is NonNullable<typeof entry> => Boolean(entry),
-        )
+      ? enabledItemsForDate(date)
       : item
         ? [item]
         : [];
@@ -157,6 +168,8 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
       const lenses = splitLenses(reading);
       useStudio.getState().updateItem(item.id, {
         body: reading,
+        title: titleDraft,
+        subtitle: subtitleDraft,
         intro: lenses.intro,
         money: lenses.money,
         love: lenses.love,
@@ -172,13 +185,15 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
       }
       if (!mappingNow) throw new Error("Column mapping is missing.");
       const { updateWorkbookReading } = await import("@/engine/workbook");
-      const nextBytes = updateWorkbookReading(bytes, mappingNow, { ...item, body: reading }, reading);
+      const nextBytes = updateWorkbookReading(bytes, mappingNow, { ...item, body: reading, title: titleDraft, subtitle: subtitleDraft }, reading);
       useStudio.getState().setWorkbookFile(nextBytes, useStudio.getState().workbookPath);
       workbookRef.current = workbookRef.current
         ? { ...workbookRef.current, data: nextBytes }
         : workbookRef.current;
       const target = await persistWorkbookFile(sourceName, nextBytes, useStudio.getState().workbookPath);
       setSavedBody(reading);
+      setSavedTitle(titleDraft);
+      setSavedSubtitle(subtitleDraft);
       setDraft(reading);
       useStudio.getState().log("info", `Saved ${item.channel} ${item.date} to ${sourceName}.`, target);
       if (target === "download") toast("Workbook downloaded with this reading.");
@@ -192,7 +207,9 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
     }
   }
 
-  const dirty = Boolean(item) && draft.trim() !== savedBody.trim();
+  const dirty = Boolean(item) && (
+    draft.trim() !== savedBody.trim() || titleDraft !== savedTitle || subtitleDraft !== savedSubtitle
+  );
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-5 overflow-y-auto p-4">
@@ -288,7 +305,7 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
         <div className="mb-2 flex items-center justify-between">
           <p className="text-sm text-fg">Twelve signs</p>
           <p className={cn("text-xs", readyCount === 12 ? "text-ok" : "text-danger")}>
-            {readyCount}/12 ready
+            {readyCount}/12 source ready · {enabled.length} enabled
           </p>
         </div>
         <div className="grid grid-cols-1 gap-1">
@@ -297,15 +314,25 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
             const blocked = row ? blockingErrors(dayIssues, row.id) : [{ message: "Missing" }];
             const selected = item?.channel === sign;
             return (
+              <div key={sign} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  aria-label={`Enable ${sign}`}
+                  checked={enabledSigns[sign]}
+                  onChange={(event) => useStudio.getState().setSign(sign, event.target.checked)}
+                  className="size-4 shrink-0 accent-gilt"
+                />
               <button
-                key={sign}
+                aria-label={`Select ${sign}`}
+                aria-pressed={selected}
                 type="button"
                 onClick={() => {
-                  if (row) useStudio.getState().select(row.id);
+                  if (row) useStudio.getState().selectSign(sign);
                   else toast.error(`${date} has no ${sign} reading.`);
                 }}
                 className={cn(
-                  "flex items-center justify-between rounded-[var(--radius-md)] border px-3 py-2 text-left text-sm",
+                  "flex flex-1 items-center justify-between rounded-[var(--radius-md)] border px-3 py-2 text-left text-sm",
+                  !enabledSigns[sign] && "opacity-50",
                   selected ? "border-gilt bg-surface-2 text-fg" : "border-transparent text-muted hover:bg-surface-2 hover:text-fg",
                 )}
               >
@@ -319,6 +346,7 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
                   <CheckCircle2 className="size-3.5 text-ok" />
                 )}
               </button>
+              </div>
             );
           })}
         </div>
@@ -332,6 +360,16 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
               {item.theme ? ` · ${item.theme}` : ""}
             </p>
             {dirty ? <p className="text-xs text-gilt">Unsaved</p> : null}
+          </div>
+          <div className="mt-2 grid gap-2">
+            <label className="space-y-1">
+              <Label>Title</Label>
+              <input value={titleDraft} onChange={(e) => { setTitleDraft(e.target.value); useStudio.getState().updateItem(item.id, { title: e.target.value }); }} className="h-10 w-full rounded-[var(--radius-md)] border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-gilt/70" />
+            </label>
+            <label className="space-y-1">
+              <Label>Date line</Label>
+              <input value={subtitleDraft} onChange={(e) => { setSubtitleDraft(e.target.value); useStudio.getState().updateItem(item.id, { subtitle: e.target.value }); }} className="h-10 w-full rounded-[var(--radius-md)] border border-border bg-surface-2 px-3 text-sm text-fg outline-none focus-visible:ring-2 focus-visible:ring-gilt/70" />
+            </label>
           </div>
           <textarea
             value={draft}
@@ -384,8 +422,8 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
         <Button disabled={!item || batch.running} onClick={() => void renderSelection(false)}>
           Render {item?.channel ?? "this sign"}
         </Button>
-        <Button variant="secondary" disabled={!date || batch.running} onClick={() => void renderSelection(true)}>
-          Render all 12 for {date || "this date"}
+        <Button variant="secondary" disabled={!date || !enabled.length || batch.running} onClick={() => void renderSelection(true)}>
+          Render all {enabled.length} enabled signs for {date || "this date"}
         </Button>
         {typeof window !== "undefined" && window.aetherDesktop ? (
           <Button variant="ghost" onClick={() => void window.aetherDesktop?.openOutputFolder(date)}>

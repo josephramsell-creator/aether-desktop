@@ -5,7 +5,7 @@ import { createCanvasMeasurer } from "./layout";
 import { downloadBlob, renderVideo } from "./recorder";
 import type { LoadedAssets } from "./assets";
 import { ensureBadge, loadTemplateAssets } from "./assets";
-import { useStudio } from "@/store/studio";
+import { enabledItemsForDate, useStudio } from "@/store/studio";
 import { ZODIAC_SIGNS } from "@/templates/horoscope/signs";
 
 export type SaveReviewFile = (filename: string, bytes: Uint8Array) => Promise<number | void>;
@@ -196,7 +196,7 @@ export function installBatchHost() {
 
   w.__aetherRenderDate = async (date: string) => {
     const store = useStudio.getState();
-    const jobs = store.items.filter((item) => item.date === date);
+    const jobs = enabledItemsForDate(date);
     if (!jobs.length) throw new Error(`No readings for ${date}`);
     const assets = await loadTemplateAssets(store.template);
     const saveFile = w.__aetherSaveReviewFile;

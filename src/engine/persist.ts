@@ -1,3 +1,5 @@
+import { useStudio } from "@/store/studio";
+import { ZODIAC_SIGNS } from "@/templates/horoscope/signs";
 import type { TemplateConfig, WorkbookMapping } from "./types";
 
 const LAYOUT_KEY = "aether.layout.v1";
@@ -154,3 +156,43 @@ export async function persistWorkbookFile(
   return "download";
 }
 
+// Subscribe before loading so startup interaction wins over an older saved choice.
+export function installSignPersistence(): () => void {
+  const key = "aether.signs.v1";
+  let active = true;
+  let hydrating = false;
+  const touched = new Set<string>();
+  let writes = Promise.resolve();
+  const persist = () => {
+    const payload = { ...useStudio.getState().enabledSigns };
+    writes = writes.then(async () => {
+      try { localStorage.setItem(key, JSON.stringify(payload)); } catch { /* optional fallback */ }
+      try { await window.aetherDesktop?.saveConfig?.("signs.json", payload); }
+      catch { useStudio.getState().log("warn", "Could not persist sign choices to disk."); }
+    });
+  };
+  const unsubscribe = useStudio.subscribe((state, previous) => {
+    if (state.enabledSigns === previous.enabledSigns || hydrating) return;
+    for (const sign of ZODIAC_SIGNS) {
+      if (state.enabledSigns[sign] !== previous.enabledSigns[sign]) touched.add(sign);
+    }
+    persist();
+  });
+  void (async () => {
+    let saved: unknown;
+    try { saved = await window.aetherDesktop?.loadConfig?.("signs.json"); } catch { /* fallback */ }
+    if (!saved) {
+      try { saved = JSON.parse(localStorage.getItem(key) ?? "null"); } catch { /* defaults */ }
+    }
+    if (!active || !saved || typeof saved !== "object") return;
+    hydrating = true;
+    for (const sign of ZODIAC_SIGNS) {
+      const value = (saved as Record<string, unknown>)[sign];
+      if (!touched.has(sign) && typeof value === "boolean") useStudio.getState().setSign(sign, value);
+    }
+    hydrating = false;
+    // Save the merged state if a command raced the initial disk read.
+    if (touched.size) persist();
+  })();
+  return () => { active = false; unsubscribe(); };
+}
