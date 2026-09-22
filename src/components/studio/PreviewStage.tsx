@@ -111,7 +111,7 @@ export function PreviewStage({ assets }: { assets: LoadedAssets | null }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center gap-4">
-      <div className="relative aspect-[9/16] w-full max-w-xs overflow-hidden rounded-[var(--radius-xl)] border border-border bg-bg shadow-[0_0_0_1px_rgba(198,163,106,0.16)] md:max-w-sm">
+      <div className="relative aspect-[9/16] h-full max-h-[calc(100dvh-245px)] w-auto max-w-full overflow-hidden rounded-[var(--radius-xl)] border border-border bg-bg shadow-[0_0_0_1px_rgba(198,163,106,0.16)]">
         <canvas
           ref={canvasRef}
           width={template.canvas.width}
