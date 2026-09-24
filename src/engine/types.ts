@@ -74,6 +74,8 @@ export interface TemplateConfig {
   typewriter: TypewriterConfig;
   verticalAlign: VerticalAlign;
   backgroundColor: string;
+  /** Aether speeds the typewriter up, never past a readable pace, to land near this length. */
+  targetSec?: number;
 }
 
 export interface ContentItem {
@@ -103,6 +105,14 @@ export interface ContentItem {
   hashtags?: string;
   status?: string;
   notes?: string;
+  /** Which render of the source row this is: full, love, money, work. */
+  cut?: string;
+  /** Source row id when this item is a cut. */
+  parentId?: string;
+  /** Post description, e.g. the astrology note moved off-screen for shorts. */
+  description?: string;
+  /** Overrides the template's target length for this render. */
+  targetSec?: number;
 }
 
 export type WorkbookFormat = "wide" | "long";
@@ -158,6 +168,7 @@ export interface LimitsConfig {
 export const DEFAULT_LIMITS: LimitsConfig = {
   minChars: 60,
   maxChars: 2200,
-  warnDurationSec: 75,
-  errorDurationSec: 180,
+  // Short-form: most videos 30–60s, a few may stretch toward ~74s.
+  warnDurationSec: 61,
+  errorDurationSec: 75,
 };

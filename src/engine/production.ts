@@ -1,4 +1,5 @@
 import type { ContentItem, TemplateConfig, WorkbookMapping } from "./types";
+import { parseSections } from "./cuts";
 
 export interface ProductionFields {
   theme?: string;
@@ -107,31 +108,15 @@ function trimDot(text: string): string {
 }
 
 export function splitLenses(body: string): Pick<ProductionFields, "intro" | "money" | "love" | "work" | "caution"> {
-  const labels = ["Money", "Love", "Work", "Caution"] as const;
-  const parts: Partial<Record<(typeof labels)[number], string>> = {};
-  let remaining = body.replace(/\r\n/g, "\n");
-  let intro = remaining;
-  for (let i = 0; i < labels.length; i++) {
-    const label = labels[i]!;
-    const start = remaining.search(new RegExp(`\\b${label}:`, "i"));
-    if (start < 0) continue;
-    if (i === 0) intro = remaining.slice(0, start).trim();
-    remaining = remaining.slice(start + label.length + 1);
-    const next = labels[i + 1];
-    if (next) {
-      const end = remaining.search(new RegExp(`\\b${next}:`, "i"));
-      parts[label] = trimDot(end < 0 ? remaining : remaining.slice(0, end));
-      if (end >= 0) remaining = remaining.slice(end);
-    } else {
-      parts[label] = trimDot(remaining);
-    }
-  }
+  // Sections may appear in any order (Love before Money, an Astrology note at the end, ...).
+  const sections = parseSections(body);
+  const clean = (text?: string) => (text ? trimDot(text) : undefined);
   return {
-    intro: intro.replace(/\n+/g, " ").trim(),
-    money: parts.Money,
-    love: parts.Love,
-    work: parts.Work,
-    caution: parts.Caution,
+    intro: sections.intro,
+    money: clean(sections.money),
+    love: clean(sections.love),
+    work: clean(sections.work),
+    caution: clean(sections.caution),
   };
 }
 

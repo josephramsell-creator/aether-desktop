@@ -1,5 +1,7 @@
 import { useRef } from "react";
+import { Lock } from "lucide-react";
 import { useStudio } from "@/store/studio";
+import { cn } from "@/lib/utils";
 import { savePersistedLayout } from "@/engine/persist";
 import type { Rect } from "@/engine/types";
 
@@ -12,6 +14,7 @@ interface RegionHandle {
 export function GuideOverlay() {
   const template = useStudio((s) => s.template);
   const showGuides = useStudio((s) => s.showGuides);
+  const locks = useStudio((s) => s.locks);
   const frameRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: RegionHandle["id"]; startY: number; orig: number } | null>(null);
 
@@ -67,6 +70,7 @@ export function GuideOverlay() {
   const onPointerDown = (id: RegionHandle["id"], rect: Rect, event: React.PointerEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    if (useStudio.getState().locks[id]) return;
     (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
     drag.current = { id, startY: toCanvasY(event.clientY), orig: rect.y };
   };
@@ -105,10 +109,17 @@ export function GuideOverlay() {
           >
             <button
               type="button"
-              aria-label={`Move ${region.label} vertically`}
-              className="absolute left-1/2 top-0 z-10 flex h-5 w-16 -translate-x-1/2 -translate-y-1/2 cursor-ns-resize items-center justify-center rounded-full border border-gilt/80 bg-surface/90 text-[10px] uppercase tracking-wider text-gilt"
+              aria-label={locks[region.id] ? `${region.label} is locked` : `Move ${region.label} vertically`}
+              title={locks[region.id] ? `${region.label} is locked. Unlock it in Regions to move it.` : undefined}
+              className={cn(
+                "absolute left-1/2 top-0 z-10 flex h-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-1 rounded-full border bg-surface/90 px-2 text-[10px] uppercase tracking-wider",
+                locks[region.id]
+                  ? "cursor-not-allowed border-border text-muted"
+                  : "min-w-16 cursor-ns-resize border-gilt/80 text-gilt",
+              )}
               onPointerDown={(event) => onPointerDown(region.id, region.rect, event)}
             >
+              {locks[region.id] ? <Lock className="size-2.5" /> : null}
               {region.label}
             </button>
           </div>

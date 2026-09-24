@@ -5,7 +5,10 @@ import { cn } from "@/lib/utils";
 export function Slider({ className, ...props }: ComponentProps<typeof SliderPrimitive.Root>) {
   return (
     <SliderPrimitive.Root
-      className={cn("relative flex w-full touch-none items-center select-none", className)}
+      className={cn(
+        "relative flex w-full touch-none items-center select-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-40",
+        className,
+      )}
       {...props}
     >
       <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-border">

@@ -5,6 +5,8 @@ import {
   CheckCircle2,
   Download,
   FileSpreadsheet,
+  Lock,
+  LockOpen,
   RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,7 +21,7 @@ import { runRenderJobs } from "@/engine/batch";
 import type { LoadedAssets } from "@/engine/assets";
 import { ZODIAC_SIGNS } from "@/templates/horoscope/signs";
 import { createHoroscopeTemplate } from "@/templates/horoscope/template";
-import { useStudio, type StudioTab } from "@/store/studio";
+import { REGION_IDS, useStudio, type StudioTab } from "@/store/studio";
 import { cn } from "@/lib/utils";
 import type { ContentItem } from "@/engine/types";
 import { ReviewGallery } from "./ReviewGallery";
@@ -64,7 +66,14 @@ export function Controls({ assets }: { assets: LoadedAssets | null }) {
 function LayoutPanel() {
   const template = useStudio((s) => s.template);
   const showGuides = useStudio((s) => s.showGuides);
+  const locks = useStudio((s) => s.locks);
   const region = template.textRegion;
+  const allLocked = REGION_IDS.every((id) => locks[id]);
+  const setLocks = (patch: Partial<typeof locks>) => {
+    useStudio.getState().setLocks(patch);
+    const state = useStudio.getState();
+    void savePersistedLayout(state.template, state.showGuides);
+  };
 
   return (
     <div className="space-y-6">
@@ -86,12 +95,29 @@ function LayoutPanel() {
           }}
         />
       </Row>
+      <div className="flex items-center justify-between gap-2 rounded-[var(--radius-md)] border border-border bg-surface-2 px-3 py-2">
+        <p className="text-xs text-muted">
+          {allLocked
+            ? "All positions locked for every sign and workbook."
+            : "Lock a position to keep it for every sign and workbook."}
+        </p>
+        <Button
+          variant={allLocked ? "secondary" : "ghost"}
+          className="h-8 shrink-0 px-3 text-xs"
+          onClick={() => setLocks(Object.fromEntries(REGION_IDS.map((id) => [id, !allLocked])))}
+        >
+          {allLocked ? <LockOpen className="size-3.5" /> : <Lock className="size-3.5" />}
+          {allLocked ? "Unlock all" : "Lock all"}
+        </Button>
+      </div>
       {template.title ? (
         <Num
           label="Title Y"
           value={template.title.region.y}
           min={500}
           max={900}
+          locked={locks.title}
+          onToggleLock={() => setLocks({ title: !locks.title })}
           onChange={(y) => {
             useStudio.getState().patchTemplate({
               title: { ...template.title!, region: { ...template.title!.region, y } },
@@ -106,6 +132,8 @@ function LayoutPanel() {
           value={template.subtitle.region.y}
           min={540}
           max={940}
+          locked={locks.subtitle}
+          onToggleLock={() => setLocks({ subtitle: !locks.subtitle })}
           onChange={(y) => {
             useStudio.getState().patchTemplate({
               subtitle: { ...template.subtitle!, region: { ...template.subtitle!.region, y } },
@@ -119,6 +147,8 @@ function LayoutPanel() {
         value={region.y}
         min={620}
         max={1100}
+        locked={locks.text}
+        onToggleLock={() => setLocks({ text: !locks.text })}
         onChange={(y) => {
           useStudio.getState().patchTemplate({
             textRegion: { ...region, y },
@@ -129,20 +159,26 @@ function LayoutPanel() {
       <div className="flex flex-wrap gap-2">
         <Button
           variant="secondary"
+          disabled={allLocked}
           onClick={() => {
             const fresh = createHoroscopeTemplate();
             const current = useStudio.getState().template;
             useStudio.getState().setTemplate({
               ...current,
-              textRegion: { ...current.textRegion, y: fresh.textRegion.y },
-              title: current.title
+              textRegion: locks.text ? current.textRegion : { ...current.textRegion, y: fresh.textRegion.y },
+              title: current.title && !locks.title
                 ? { ...current.title, region: { ...current.title.region, y: fresh.title!.region.y } }
                 : current.title,
-              subtitle: current.subtitle
+              subtitle: current.subtitle && !locks.subtitle
                 ? { ...current.subtitle, region: { ...current.subtitle.region, y: fresh.subtitle!.region.y } }
                 : current.subtitle,
             });
-            toast("Restored vertical positions. Medallion unchanged.");
+            void savePersistedLayout(useStudio.getState().template, useStudio.getState().showGuides);
+            toast(
+              Object.values(locks).some(Boolean)
+                ? "Restored unlocked positions. Locked ones stayed put."
+                : "Restored vertical positions. Medallion unchanged.",
+            );
           }}
         >
           <RotateCcw className="size-4" />
@@ -532,6 +568,8 @@ function Num({
   max,
   step = 1,
   onChange,
+  locked,
+  onToggleLock,
 }: {
   label: string;
   value: number;
@@ -539,22 +577,49 @@ function Num({
   max: number;
   step?: number;
   onChange: (value: number) => void;
+  locked?: boolean;
+  onToggleLock?: () => void;
 }) {
   return (
-    <div className="space-y-2">
+    <div className={cn("space-y-2", locked && "opacity-80")}>
       <div className="flex items-center justify-between gap-2">
         <Label>{label}</Label>
-        <input
-          type="number"
-          className="h-8 w-20 rounded-[var(--radius-sm)] border border-border bg-surface-2 px-2 text-right text-xs tabular-nums text-fg"
-          value={Number(value.toFixed(2))}
-          min={min}
-          max={max}
-          step={step}
-          onChange={(e) => onChange(Number(e.target.value))}
-        />
+        <div className="flex items-center gap-1.5">
+          {onToggleLock ? (
+            <button
+              type="button"
+              aria-label={`${locked ? "Unlock" : "Lock"} ${label}`}
+              aria-pressed={Boolean(locked)}
+              title={locked ? "Locked for every sign and workbook. Click to unlock." : "Lock this position"}
+              onClick={onToggleLock}
+              className={cn(
+                "flex size-8 items-center justify-center rounded-[var(--radius-sm)] border",
+                locked ? "border-gilt bg-surface-2 text-gilt" : "border-border text-faint hover:text-fg",
+              )}
+            >
+              {locked ? <Lock className="size-3.5" /> : <LockOpen className="size-3.5" />}
+            </button>
+          ) : null}
+          <input
+            type="number"
+            disabled={locked}
+            className="h-8 w-20 rounded-[var(--radius-sm)] border border-border bg-surface-2 px-2 text-right text-xs tabular-nums text-fg disabled:cursor-not-allowed disabled:text-muted"
+            value={Number(value.toFixed(2))}
+            min={min}
+            max={max}
+            step={step}
+            onChange={(e) => onChange(Number(e.target.value))}
+          />
+        </div>
       </div>
-      <Slider min={min} max={max} step={step} value={[value]} onValueChange={(v) => onChange(v[0] ?? value)} />
+      <Slider
+        min={min}
+        max={max}
+        step={step}
+        value={[value]}
+        disabled={locked}
+        onValueChange={(v) => onChange(v[0] ?? value)}
+      />
     </div>
   );
 }

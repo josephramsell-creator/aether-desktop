@@ -89,5 +89,6 @@ export function createHoroscopeTemplate(): TemplateConfig {
     },
     verticalAlign: "center",
     backgroundColor: "#050505",
+    targetSec: 60,
   };
 }

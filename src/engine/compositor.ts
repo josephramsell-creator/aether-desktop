@@ -1,9 +1,9 @@
-import { createCanvasMeasurer, fontShorthand, layoutCopy } from "./layout";
+import { createCanvasMeasurer, fontShorthand } from "./layout";
 import { stateAt, type FrameState, type Timeline } from "./timeline";
 import type { LoadedAssets } from "./assets";
 import type { ContentItem, Rect, TemplateConfig, TypographyConfig } from "./types";
-import { buildTimeline } from "./timeline";
 import { templateForItem } from "./production";
+import { paceRender } from "./pacing";
 
 export interface PreparedRender {
   template: TemplateConfig;
@@ -18,16 +18,9 @@ export function prepareRender(
   template: TemplateConfig,
   item: ContentItem,
 ): PreparedRender {
-  const resolved = templateForItem(template, item);
-  const measure = createCanvasMeasurer(ctx, resolved.textTypography);
-  const { lines, pages } = layoutCopy(
-    item.body,
-    resolved.textRegion.width,
-    resolved.typewriter.linesPerPage,
-    measure,
-  );
-  const timeline = buildTimeline(pages, resolved.typewriter);
-  return { template: resolved, item, timeline, pages, lines };
+  const measure = createCanvasMeasurer(ctx, templateForItem(template, item).textTypography);
+  const paced = paceRender(template, item, measure);
+  return { template: paced.template, item, timeline: paced.timeline, pages: paced.pages, lines: paced.lines };
 }
 
 export function drawFrame(

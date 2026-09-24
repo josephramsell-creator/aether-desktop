@@ -9,13 +9,15 @@ import { ingestHoroscopeText } from "@/content-engine/horoscope/archive";
 import { installBatchHost } from "@/engine/batch";
 import {
   applyLayoutPersist,
+  loadActiveWorkbook,
   loadGuidesFlag,
   loadPersistedLayout,
   loadPersistedMapping,
   savePersistedLayout,
 } from "@/engine/persist";
 import { type ZodiacSign } from "@/templates/horoscope/signs";
-import { installSignPersistence } from "@/engine/persist";
+import { installCutPersistence, installSignPersistence } from "@/engine/persist";
+import type { CutId } from "@/engine/cuts";
 import { useStudio } from "@/store/studio";
 import { PreviewStage } from "./PreviewStage";
 import { Controls } from "./Controls";
@@ -45,6 +47,7 @@ export function StudioApp() {
   }, []);
 
   useEffect(() => installSignPersistence(), []);
+  useEffect(() => installCutPersistence(), []);
 
   useEffect(() => {
     installBatchHost();
@@ -53,6 +56,8 @@ export function StudioApp() {
   useEffect(() => {
     const w = window as Window & {
       aetherControl?: {
+        getCuts: () => Record<CutId, boolean>;
+        setCut: (cut: CutId, enabled: boolean) => Record<CutId, boolean>;
         getSigns: () => { selected: string | null; signs: Record<ZodiacSign, boolean> };
         setSign: (sign: ZodiacSign, enabled: boolean) => { selected: string | null; signs: Record<ZodiacSign, boolean> };
         selectSign: (sign: ZodiacSign) => { selected: string | null; signs: Record<ZodiacSign, boolean> };
@@ -77,7 +82,13 @@ export function StudioApp() {
         signs: { ...state.enabledSigns },
       };
     };
+    const getCuts = () => ({ ...useStudio.getState().enabledCuts });
     w.aetherControl = {
+      getCuts,
+      setCut: (cut, enabled) => {
+        useStudio.getState().setCut(cut, enabled);
+        return getCuts();
+      },
       getSigns,
       setSign: (sign, enabled) => { useStudio.getState().setSign(sign, enabled); return getSigns(); },
       selectSign: (sign) => { useStudio.getState().selectSign(sign); return getSigns(); },
@@ -85,6 +96,12 @@ export function StudioApp() {
       setLayout: async (patch) => {
         const state = useStudio.getState();
         const current = state.template;
+        const blocked = [
+          typeof patch.titleY === "number" && state.locks.title ? "Title" : "",
+          typeof patch.dateLineY === "number" && state.locks.subtitle ? "Date line" : "",
+          typeof patch.readingY === "number" && state.locks.text ? "Reading" : "",
+        ].filter(Boolean);
+        if (blocked.length) throw new Error(`${blocked.join(", ")} ${blocked.length > 1 ? "are" : "is"} locked.`);
         state.patchTemplate({
           ...(typeof patch.titleY === "number" && current.title
             ? { title: { ...current.title, region: { ...current.title.region, y: patch.titleY } } }
@@ -115,6 +132,7 @@ export function StudioApp() {
         const current = useStudio.getState().template;
         useStudio.getState().setTemplate(applyLayoutPersist(current, saved));
         if (typeof saved.showGuides === "boolean") useStudio.getState().setGuides(saved.showGuides);
+        if (saved.locks) useStudio.getState().setLocks(saved.locks);
       } else {
         const guides = loadGuidesFlag();
         if (guides !== null) useStudio.getState().setGuides(guides);
@@ -131,6 +149,34 @@ export function StudioApp() {
     let cancelled = false;
     (async () => {
       try {
+        // Reopen the last workbook that was dropped or opened, before falling back to the bundled one.
+        const active = await loadActiveWorkbook();
+        const stored = active ? await window.aetherDesktop?.readWorkbook?.(active.path) : null;
+        if (stored && !cancelled) {
+          const bytes = new Uint8Array(stored.bytes);
+          const data = new ArrayBuffer(bytes.byteLength);
+          new Uint8Array(data).set(bytes);
+          const { inspectWorkbook, applyWorkbookMapping } = await import("@/engine/workbook");
+          const inspected = inspectWorkbook(data, stored.name);
+          const saved = await loadPersistedMapping();
+          const mapping =
+            inspected.suggested ??
+            (saved && inspected.sheets.some((sheet) => sheet.name === saved.sheet) ? saved : null);
+          const parsed = mapping ? applyWorkbookMapping(data, stored.name, mapping) : null;
+          if (parsed?.items.length && mapping && !cancelled) {
+            useStudio.getState().setWorkbookFile(data, stored.path);
+            useStudio.getState().setItems(parsed.items, parsed.dates);
+            useStudio.getState().setSource(stored.name, mapping);
+            const today = new Date().toISOString().slice(0, 10);
+            const day = parsed.dates.find((entry) => entry >= today) ?? parsed.dates[0];
+            const preferred = parsed.items.find((entry) => entry.date === day) ?? parsed.items[0];
+            if (preferred) useStudio.getState().select(preferred.id);
+            useStudio.getState().log("info", `Loaded ${parsed.items.length} readings from ${stored.name}.`, stored.path);
+            return;
+          }
+          useStudio.getState().log("warn", `Could not reload ${stored.name}; using the bundled workbook.`, stored.path);
+        }
+
         const xlsx = await fetch(`/content/aether-production.xlsx?t=${Date.now()}`, { cache: "no-store" });
         if (xlsx.ok) {
           const data = await xlsx.arrayBuffer();

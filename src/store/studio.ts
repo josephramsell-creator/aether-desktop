@@ -4,8 +4,13 @@ import { createHoroscopeTemplate } from "@/templates/horoscope/template";
 import { DEFAULT_WORKBOOK_MAPPING } from "@/engine/production";
 import { ZODIAC_SIGNS, type ZodiacSign } from "@/templates/horoscope/signs";
 import seed from "@/data/aether-production.json";
+import { CUT_IDS, cutItem, cutsFor, type CutId } from "@/engine/cuts";
 
 export type StudioTab = "layout" | "type" | "output" | "log";
+
+/** Movable text blocks: sign title, date line, reading. */
+export type RegionId = "title" | "subtitle" | "text";
+export const REGION_IDS: RegionId[] = ["title", "subtitle", "text"];
 
 export interface BatchState {
   running: boolean;
@@ -23,6 +28,15 @@ interface StudioStore {
   enabledSigns: Record<ZodiacSign, boolean>;
   setSign: (sign: ZodiacSign, enabled: boolean) => void;
   selectSign: (sign: ZodiacSign) => void;
+  /** Which versions Render produces for each reading. */
+  enabledCuts: Record<CutId, boolean>;
+  setCut: (cut: CutId, enabled: boolean) => void;
+  /** Version shown in the preview. */
+  previewCut: CutId;
+  setPreviewCut: (cut: CutId) => void;
+  /** Locked regions cannot be moved by slider, drag, reset, or aetherControl. */
+  locks: Record<RegionId, boolean>;
+  setLocks: (locks: Partial<Record<RegionId, boolean>>) => void;
   showGuides: boolean;
   playing: boolean;
   playhead: number;
@@ -85,6 +99,15 @@ export const useStudio = create<StudioStore>((set, get) => ({
     if (!item) throw new Error(`${date ?? "Selected date"} has no ${sign} reading.`);
     state.select(item.id);
   },
+  enabledCuts: Object.fromEntries(CUT_IDS.map((cut) => [cut, true])) as Record<CutId, boolean>,
+  setCut: (cut, enabled) => {
+    if (!CUT_IDS.includes(cut) || typeof enabled !== "boolean") throw new Error("Expected full, love, money, or work and a boolean.");
+    set((state) => ({ enabledCuts: { ...state.enabledCuts, [cut]: enabled } }));
+  },
+  previewCut: "full",
+  setPreviewCut: (previewCut) => set({ previewCut, playhead: 0, playing: false }),
+  locks: { title: false, subtitle: false, text: false },
+  setLocks: (patch) => set((state) => ({ locks: { ...state.locks, ...patch } })),
   showGuides: true,
   playing: false,
   playhead: 0,
@@ -186,4 +209,21 @@ export function enabledItemsForDate(date: string): ContentItem[] {
   return ZODIAC_SIGNS.filter((sign) => enabledSigns[sign]).flatMap((sign) =>
     items.filter((item) => item.date === date && item.channel === sign),
   );
+}
+
+/** Every enabled version (full, love, money, work) of every enabled sign for a date. */
+export function enabledJobsForDate(date: string): ContentItem[] {
+  const { enabledCuts } = useStudio.getState();
+  return enabledItemsForDate(date).flatMap((item) => cutsFor(item, enabledCuts));
+}
+
+/** The enabled versions of one reading. */
+export function enabledJobsForItem(item: ContentItem): ContentItem[] {
+  return cutsFor(item, useStudio.getState().enabledCuts);
+}
+
+/** What the preview shows: the selected reading as the chosen version, falling back to full. */
+export function previewItem(item: ContentItem | undefined, cut: CutId): ContentItem | undefined {
+  if (!item) return undefined;
+  return cutItem(item, cut) ?? cutItem(item, "full") ?? item;
 }

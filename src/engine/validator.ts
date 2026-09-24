@@ -1,5 +1,5 @@
-import { layoutCopy, longestUnbreakableWord, type MeasureFn } from "./layout";
-import { buildTimeline } from "./timeline";
+import { longestUnbreakableWord, type MeasureFn } from "./layout";
+import { paceRender } from "./pacing";
 import {
   DEFAULT_LIMITS,
   type ContentItem,
@@ -161,25 +161,22 @@ function validateItem(
       });
     }
 
-    const { pages } = layoutCopy(
-      body,
-      resolved.textRegion.width,
-      resolved.typewriter.linesPerPage,
-      measure,
-    );
-    const timeline = buildTimeline(pages, resolved.typewriter);
+    const { timeline } = paceRender(template, item, measure);
+    const target = item.targetSec ?? template.targetSec;
+    // Roughly four words per second of screen time at a readable pace.
+    const trim = (limit: number) => `cut about ${Math.max(1, Math.ceil((timeline.duration - limit) * 4))} words`;
     if (timeline.duration > limits.errorDurationSec) {
       issues.push({
         level: "error",
         code: "too-long-duration",
-        message: `${label(item)} would run ${timeline.duration.toFixed(1)}s (limit ${limits.errorDurationSec}s).`,
+        message: `${label(item)} would run ${timeline.duration.toFixed(1)}s (limit ${limits.errorDurationSec}s) — ${trim(target ?? limits.errorDurationSec)}.`,
         itemId: item.id,
       });
-    } else if (timeline.duration > limits.warnDurationSec) {
+    } else if (timeline.duration > (target ? target + 1 : limits.warnDurationSec)) {
       issues.push({
         level: "warning",
         code: "long-duration",
-        message: `${label(item)} runs ${timeline.duration.toFixed(1)}s.`,
+        message: `${label(item)} runs ${timeline.duration.toFixed(1)}s${target ? ` (target ${target}s) — ${trim(target)}` : ""}.`,
         itemId: item.id,
       });
     }
@@ -210,10 +207,12 @@ export function blockingErrors(issues: ValidationIssue[], itemId?: string): Vali
 export function filenameFor(item: ContentItem): string {
   const date = item.date ?? "undated";
   const channel = (item.channel || "item").replace(/\s+/g, "");
-  return `${date}_${channel}.mp4`;
+  const cut = item.cut ? `_${item.cut}` : "";
+  return `${date}_${channel}${cut}.mp4`;
 }
 
 function label(item: ContentItem): string {
   const date = item.date ?? "undated";
-  return `${date} ${item.channel}`;
+  const cut = item.cut && item.cut !== "full" ? ` ${item.cut}` : "";
+  return `${date} ${item.channel}${cut}`;
 }

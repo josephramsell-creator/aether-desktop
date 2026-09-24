@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("aetherDesktop", {
   createDesktopShortcut: () => ipcRenderer.invoke("desktop:shortcut"),
   openWorkbook: () => ipcRenderer.invoke("desktop:open-workbook"),
   saveWorkbook: (path, bytes) => ipcRenderer.invoke("desktop:save-workbook", { path, bytes }),
+  importWorkbook: (name, bytes) => ipcRenderer.invoke("desktop:import-workbook", { name, bytes }),
+  readWorkbook: (path) => ipcRenderer.invoke("desktop:read-workbook", path),
   saveConfig: (name, data) => ipcRenderer.invoke("desktop:save-config", name, data),
   loadConfig: (name) => ipcRenderer.invoke("desktop:load-config", name),
 });

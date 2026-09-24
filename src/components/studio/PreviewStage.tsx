@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Pause, Play, RotateCcw } from "lucide-react";
 import { drawFrame, prepareRender, type PreparedRender } from "@/engine/compositor";
 import type { LoadedAssets } from "@/engine/assets";
-import { useStudio } from "@/store/studio";
+import { previewItem, useStudio } from "@/store/studio";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { GuideOverlay } from "./GuideOverlay";
@@ -19,7 +19,9 @@ export function PreviewStage({ assets }: { assets: LoadedAssets | null }) {
   const showGuides = useStudio((s) => s.showGuides);
   const fontsReady = useStudio((s) => s.fontsReady);
   const assetsReady = useStudio((s) => s.assetsReady);
-  const item = items.find((entry) => entry.id === selectedId);
+  const previewCut = useStudio((s) => s.previewCut);
+  const source = items.find((entry) => entry.id === selectedId);
+  const item = useMemo(() => previewItem(source, previewCut), [source, previewCut]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

@@ -5,7 +5,8 @@ import { createCanvasMeasurer } from "./layout";
 import { downloadBlob, renderVideo } from "./recorder";
 import type { LoadedAssets } from "./assets";
 import { ensureBadge, loadTemplateAssets } from "./assets";
-import { enabledItemsForDate, useStudio } from "@/store/studio";
+import { enabledJobsForDate, enabledJobsForItem, useStudio } from "@/store/studio";
+import { postInfo } from "./cuts";
 import { ZODIAC_SIGNS } from "@/templates/horoscope/signs";
 
 export type SaveReviewFile = (filename: string, bytes: Uint8Array) => Promise<number | void>;
@@ -99,6 +100,10 @@ export async function runRenderJobs(
       saved.push({ name: filename, bytes: buffer.byteLength, durationSec: video.durationSec });
       if (options?.saveFile) {
         await options.saveFile(filename, buffer);
+        // Sidecar with title, description and hashtags for the scheduler / Nami.
+        const info = postInfo(job, filename, video.durationSec);
+        const infoName = filename.replace(/\.[a-z0-9]+$/i, ".json");
+        await options.saveFile(infoName, new TextEncoder().encode(JSON.stringify(info, null, 2)));
       } else if (asZip && jobs.length > 1) {
         files.push({ name: filename, bytes: buffer });
       } else {
@@ -186,7 +191,7 @@ export function installBatchHost() {
     const assets = await loadTemplateAssets(store.template);
     const saveFile = w.__aetherSaveReviewFile;
     if (!saveFile) throw new Error("Review save hook is not installed.");
-    const result = await runRenderJobs(assets, [job], false, {
+    const result = await runRenderJobs(assets, enabledJobsForItem(job), false, {
       saveFile,
       yieldEvery: 45,
       bitrate: 5_500_000,
@@ -196,7 +201,7 @@ export function installBatchHost() {
 
   w.__aetherRenderDate = async (date: string) => {
     const store = useStudio.getState();
-    const jobs = enabledItemsForDate(date);
+    const jobs = enabledJobsForDate(date);
     if (!jobs.length) throw new Error(`No readings for ${date}`);
     const assets = await loadTemplateAssets(store.template);
     const saveFile = w.__aetherSaveReviewFile;

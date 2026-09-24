@@ -1,6 +1,7 @@
-import { useStudio } from "@/store/studio";
+import { useStudio, type RegionId } from "@/store/studio";
 import { ZODIAC_SIGNS } from "@/templates/horoscope/signs";
 import type { TemplateConfig, WorkbookMapping } from "./types";
+import { CUT_IDS } from "./cuts";
 
 const LAYOUT_KEY = "aether.layout.v1";
 const MAPPING_KEY = "aether.mapping.v1";
@@ -11,6 +12,7 @@ export interface LayoutPersist {
   titleY?: number;
   subtitleY?: number;
   showGuides?: boolean;
+  locks?: Partial<Record<RegionId, boolean>>;
 }
 
 export function applyLayoutPersist(template: TemplateConfig, saved: LayoutPersist | null): TemplateConfig {
@@ -45,6 +47,7 @@ export function captureLayout(template: TemplateConfig, showGuides: boolean): La
     titleY: template.title?.region.y,
     subtitleY: template.subtitle?.region.y,
     showGuides,
+    locks: { ...useStudio.getState().locks },
   };
 }
 
@@ -94,6 +97,62 @@ export async function savePersistedMapping(mapping: WorkbookMapping): Promise<vo
   } catch {
     /* storage may be blocked */
   }
+}
+
+export interface ActiveWorkbook {
+  name: string;
+  path: string;
+}
+
+/** The workbook Aether reopens on launch (last one dropped or opened). */
+export async function loadActiveWorkbook(): Promise<ActiveWorkbook | null> {
+  try {
+    const saved = await window.aetherDesktop?.loadConfig?.("active-workbook.json");
+    if (saved && typeof saved === "object" && typeof (saved as ActiveWorkbook).path === "string") {
+      return saved as ActiveWorkbook;
+    }
+  } catch {
+    /* fall back to the bundled workbook */
+  }
+  return null;
+}
+
+export async function saveActiveWorkbook(active: ActiveWorkbook): Promise<void> {
+  try {
+    await window.aetherDesktop?.saveConfig?.("active-workbook.json", active);
+  } catch {
+    /* storage may be blocked */
+  }
+}
+
+/** Remember which versions (full, love, money, work) are ticked, in data/config/cuts.json. */
+export function installCutPersistence(): () => void {
+  let active = true;
+  let hydrated = false;
+  const unsubscribe = useStudio.subscribe((state, previous) => {
+    if (!hydrated || state.enabledCuts === previous.enabledCuts) return;
+    void window.aetherDesktop?.saveConfig?.("cuts.json", state.enabledCuts)?.catch(() => {
+      useStudio.getState().log("warn", "Could not persist version choices to disk.");
+    });
+  });
+  void (async () => {
+    try {
+      const saved = await window.aetherDesktop?.loadConfig?.("cuts.json");
+      if (active && saved && typeof saved === "object") {
+        for (const cut of CUT_IDS) {
+          const value = (saved as Record<string, unknown>)[cut];
+          if (typeof value === "boolean") useStudio.getState().setCut(cut, value);
+        }
+      }
+    } catch {
+      /* defaults */
+    }
+    hydrated = true;
+  })();
+  return () => {
+    active = false;
+    unsubscribe();
+  };
 }
 
 export function loadGuidesFlag(): boolean | null {

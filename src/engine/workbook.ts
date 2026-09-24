@@ -167,6 +167,15 @@ export function inspectWorkbook(data: ArrayBuffer | Uint8Array, name: string): W
   };
 }
 
+/** True when some sheet names zodiac signs in its headers or preview cells. */
+export function hasZodiacData(sheets: SheetPreview[]): boolean {
+  return sheets.some(
+    (sheet) =>
+      sheet.headers.some((header) => matchSign(header) || looksLikeSignHeader(header)) ||
+      sheet.rows.some((row) => row.some((cell) => matchSign(cell))),
+  );
+}
+
 export function suggestMapping(sheets: SheetPreview[]): WorkbookMapping | null {
   let best: { mapping: WorkbookMapping; score: number } | null = null;
   for (const sheet of sheets) {

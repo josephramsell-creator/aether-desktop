@@ -271,6 +271,10 @@ async function createWindow(port) {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+  // A file dropped outside the drop zone would otherwise replace the studio with the file.
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith(`http://127.0.0.1:${port}/`)) event.preventDefault();
+  });
   await mainWindow.loadURL(`http://127.0.0.1:${port}/`);
   if (!renderOne) mainWindow.show();
 }
@@ -307,7 +311,7 @@ ipcMain.handle("desktop:shortcut", async () => createShortcut());
 
 ipcMain.handle("desktop:open-workbook", async () => {
   const result = await dialog.showOpenDialog(mainWindow ?? undefined, {
-    title: "Open horoscope workbook",
+    title: "Open workbook",
     filters: [
       { name: "Excel", extensions: ["xlsx", "xls"] },
       { name: "CSV", extensions: ["csv"] },
@@ -330,6 +334,35 @@ ipcMain.handle("desktop:save-workbook", async (_event, payload) => {
   mkdirSync(dirname(dest), { recursive: true });
   writeFileSync(dest, buffer);
   return { path: dest };
+});
+
+const WORKBOOK_EXT = /\.(xlsx|xls|csv)$/i;
+
+// Dropped or picked workbooks are copied into data/content/workbooks so Aether always
+// runs from its own folder. Re-importing a file with the same name keeps a timestamped backup.
+ipcMain.handle("desktop:import-workbook", async (_event, payload) => {
+  const name = basename(String(payload?.name ?? "")).replace(/[<>:"|?*]/g, "_");
+  if (!WORKBOOK_EXT.test(name)) throw new Error("Only .xlsx, .xls, or .csv workbooks can be imported.");
+  const bytes = payload?.bytes;
+  const buffer = Buffer.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes ?? []));
+  if (!buffer.byteLength) throw new Error("Empty workbook.");
+  const dir = join(dataDir(), "content", "workbooks");
+  mkdirSync(dir, { recursive: true });
+  const dest = join(dir, name);
+  if (existsSync(dest)) {
+    const backups = join(dir, "backups");
+    mkdirSync(backups, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    copyFileSync(dest, join(backups, `${stamp}_${name}`));
+  }
+  writeFileSync(dest, buffer);
+  return { name, path: dest };
+});
+
+ipcMain.handle("desktop:read-workbook", async (_event, filePath) => {
+  const target = String(filePath ?? "");
+  if (!WORKBOOK_EXT.test(target) || !existsSync(target)) return null;
+  return { name: basename(target), path: target, bytes: new Uint8Array(readFileSync(target)) };
 });
 
 ipcMain.handle("desktop:save-config", async (_event, name, data) => {

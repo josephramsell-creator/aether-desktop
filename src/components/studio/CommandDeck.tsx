@@ -1,17 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, FolderOpen, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileSpreadsheet, FolderOpen, Save, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { ingestHoroscopeText } from "@/content-engine/horoscope/archive";
 import { runStudioJobs } from "@/engine/batch";
 import type { LoadedAssets } from "@/engine/assets";
-import { persistWorkbookFile, savePersistedMapping } from "@/engine/persist";
+import { persistWorkbookFile, saveActiveWorkbook, savePersistedMapping } from "@/engine/persist";
 import { blockingErrors, validateDay } from "@/engine/validator";
 import { createCanvasMeasurer } from "@/engine/layout";
 import type { SheetPreview, WorkbookMapping } from "@/engine/types";
 import { SIGN_GLYPH, ZODIAC_SIGNS } from "@/templates/horoscope/signs";
-import { enabledItemsForDate, useStudio } from "@/store/studio";
+import { enabledJobsForDate, enabledJobsForItem, useStudio } from "@/store/studio";
+import { CUTS } from "@/engine/cuts";
 import { cn } from "@/lib/utils";
 import { musicSrc, splitLenses } from "@/engine/production";
 import { WorkbookMapper } from "./WorkbookMapper";
@@ -19,6 +20,9 @@ import { WorkbookMapper } from "./WorkbookMapper";
 export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
   const enabledSigns = useStudio((s) => s.enabledSigns);
   const enabled = ZODIAC_SIGNS.filter((sign) => enabledSigns[sign]);
+  const enabledCuts = useStudio((s) => s.enabledCuts);
+  const previewCut = useStudio((s) => s.previewCut);
+  const cutCount = CUTS.filter((cut) => enabledCuts[cut.id]).length;
   const items = useStudio((s) => s.items);
   const dates = useStudio((s) => s.dates);
   const selectedId = useStudio((s) => s.selectedId);
@@ -41,6 +45,8 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
   const [savedTitle, setSavedTitle] = useState(item?.title ?? "");
   const [savedSubtitle, setSavedSubtitle] = useState(item?.subtitle ?? "");
   const [saving, setSaving] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [importing, setImporting] = useState<string | null>(null);
 
   useEffect(() => {
     setDraft(item?.body ?? "");
@@ -69,47 +75,96 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
     return row && !blockingErrors(dayIssues, row.id).length;
   }).length;
 
-  async function ingestBytes(name: string, data: ArrayBuffer) {
+  /**
+   * Every workbook (dropped, browsed, or picked) goes through here: it is copied into
+   * data/content/workbooks, loaded, and remembered so the next launch reopens it.
+   */
+  async function importWorkbook(name: string, data: ArrayBuffer) {
+    if (!/\.(xlsx|xls|csv|md|markdown)$/i.test(name)) {
+      toast.error(`${name} is not a workbook. Use .xlsx, .xls, or .csv.`);
+      return;
+    }
+    setImporting(name);
+    try {
+      let path: string | null = null;
+      const desktop = window.aetherDesktop;
+      if (desktop?.importWorkbook && !/\.(md|markdown)$/i.test(name)) {
+        const stored = await desktop.importWorkbook(name, new Uint8Array(data.slice(0)));
+        path = stored.path;
+        useStudio.getState().log("info", `Copied ${name} into Aether.`, stored.path);
+      }
+      await ingestBytes(name, data, path);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : `Could not import ${name}.`;
+      useStudio.getState().log("error", "Workbook import failed", message);
+      toast.error(message);
+    } finally {
+      setImporting(null);
+    }
+  }
+
+  async function ingestBytes(name: string, data: ArrayBuffer, path: string | null) {
     const lower = name.toLowerCase();
     if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
-      const { inspectWorkbook } = await import("@/engine/workbook");
+      const { inspectWorkbook, hasZodiacData } = await import("@/engine/workbook");
       const inspected = inspectWorkbook(data, name);
-      workbookRef.current = { name, data, sheets: inspected.sheets };
-      useStudio.getState().setWorkbookFile(data, null);
       const saved = useStudio.getState().mapping;
       const savedFits = Boolean(saved && inspected.sheets.some((sheet) => sheet.name === saved.sheet));
-      const chosen = savedFits ? saved : inspected.suggested;
-      if (chosen && (inspected.confidence === "high" || savedFits)) {
-        await applyMapping(data, name, chosen!);
+      const chosen = inspected.suggested ?? (savedFits ? saved : null);
+      if (!chosen && !hasZodiacData(inspected.sheets)) {
+        const columns = inspected.sheets[0]?.headers.slice(0, 5).join(", ") ?? "";
+        useStudio.getState().log(
+          "warn",
+          `${name} is not a horoscope workbook, so it was stored but not loaded.`,
+          `Columns: ${columns}. Only the Daily Horoscope channel can load workbooks right now.`,
+        );
+        toast.error(`${name} has no zodiac signs. It is saved in Aether, but only horoscope workbooks can load for now.`);
+        return;
+      }
+      workbookRef.current = { name, data, sheets: inspected.sheets };
+      useStudio.getState().setWorkbookFile(data, path);
+      if (chosen) {
+        await applyMapping(data, name, chosen);
         return;
       }
       setMapperOpen(true);
-      if (!chosen) toast("Choose a worksheet and columns.");
+      toast("Choose a worksheet and columns.");
       return;
     }
     const text = new TextDecoder().decode(data);
     const parsed = ingestHoroscopeText(text);
+    if (!parsed.items.length) {
+      toast.error(`No readings found in ${name}.`);
+      return;
+    }
     useStudio.getState().setItems(parsed.items, parsed.dates);
     useStudio.getState().setSource(name, null);
+    useStudio.getState().setWorkbookFile(null, null);
     parsed.warnings.forEach((warning) => useStudio.getState().log("warn", warning));
     useStudio.getState().log("info", `Loaded ${parsed.items.length} readings from ${name}.`);
+    if (path) void saveActiveWorkbook({ name, path });
     toast(`Loaded ${parsed.items.length} readings`);
-  }
-
-  async function ingestFile(file: File) {
-    await ingestBytes(file.name, await file.arrayBuffer());
   }
 
   async function applyMapping(data: ArrayBuffer, name: string, next: WorkbookMapping) {
     const { applyWorkbookMapping, mappingLabel } = await import("@/engine/workbook");
     const parsed = applyWorkbookMapping(data, name, next);
+    if (!parsed.items.length) {
+      parsed.warnings.forEach((warning) => useStudio.getState().log("warn", warning));
+      toast.error(`No readings found in ${name} with that mapping.`);
+      return;
+    }
     useStudio.getState().setItems(parsed.items, parsed.dates);
     useStudio.getState().setSource(name, next);
+    const first = parsed.items.find((entry) => entry.date === parsed.dates[0]);
+    if (first) useStudio.getState().select(first.id);
     parsed.warnings.forEach((warning) => useStudio.getState().log("warn", warning));
     useStudio.getState().log("info", `Loaded ${parsed.items.length} readings from ${name}.`, mappingLabel(next));
     void savePersistedMapping(next);
+    const path = useStudio.getState().workbookPath;
+    if (path) void saveActiveWorkbook({ name, path });
     setMapperOpen(false);
-    toast(`Loaded ${parsed.items.length} readings`);
+    toast(`Loaded ${parsed.items.length} readings · ${parsed.dates.length} days`);
   }
 
   async function openWorkbook() {
@@ -120,12 +175,54 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
       const copy = new Uint8Array(picked.bytes);
       const data = new ArrayBuffer(copy.byteLength);
       new Uint8Array(data).set(copy);
-      await ingestBytes(picked.name, data);
-      useStudio.getState().setWorkbookFile(data, picked.path);
+      await importWorkbook(picked.name, data);
       return;
     }
     fileRef.current?.click();
   }
+
+  // Accept a workbook dropped anywhere on the window, not just on the drop box.
+  useEffect(() => {
+    let depth = 0;
+    const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes("Files");
+    const onEnter = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      depth += 1;
+      setDragging(true);
+    };
+    const onLeave = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) setDragging(false);
+    };
+    const onOver = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    };
+    const onDrop = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      depth = 0;
+      setDragging(false);
+      const file = event.dataTransfer?.files?.[0];
+      if (!file) return;
+      if ((event.dataTransfer?.files.length ?? 0) > 1) toast("Importing the first file only. Drop workbooks one at a time.");
+      void file.arrayBuffer().then((data) => importWorkbook(file.name, data));
+    };
+    window.addEventListener("dragenter", onEnter);
+    window.addEventListener("dragleave", onLeave);
+    window.addEventListener("dragover", onOver);
+    window.addEventListener("drop", onDrop);
+    return () => {
+      window.removeEventListener("dragenter", onEnter);
+      window.removeEventListener("dragleave", onLeave);
+      window.removeEventListener("dragover", onOver);
+      window.removeEventListener("drop", onDrop);
+    };
+    // importWorkbook reads live state from the store, so the listener only needs installing once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function renderSelection(all: boolean) {
     if (!date) return;
@@ -138,11 +235,7 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
       useStudio.getState().setTab("output");
       return;
     }
-    const jobs = all
-      ? enabledItemsForDate(date)
-      : item
-        ? [item]
-        : [];
+    const jobs = all ? enabledJobsForDate(date) : item ? enabledJobsForItem(item) : [];
     if (!jobs.length) {
       toast.error("Nothing to render.");
       return;
@@ -225,12 +318,34 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
         </p>
       </div>
 
+      <button
+        type="button"
+        onClick={() => void openWorkbook()}
+        disabled={Boolean(importing)}
+        className={cn(
+          "flex w-full flex-col items-center gap-2 rounded-[var(--radius-md)] border-2 border-dashed px-4 py-6 text-center transition-colors",
+          dragging ? "border-gilt bg-surface-2 text-fg" : "border-border text-muted hover:border-gilt/60 hover:text-fg",
+        )}
+      >
+        <Upload className={cn("size-6", dragging ? "text-gilt" : "text-faint")} />
+        <span className="text-sm">
+          {importing ? `Importing ${importing}…` : dragging ? "Drop to import" : "Drop a workbook here"}
+        </span>
+        <span className="text-[11px] text-faint">.xlsx, .xls, or .csv · or click to browse</span>
+      </button>
+
       <div className="rounded-[var(--radius-md)] border border-border bg-surface-2 p-3">
         <p className="text-sm text-fg">{sourceName}</p>
         <p className="mt-1 text-xs text-muted">
           {items.length} readings · {dates.length} days
+          {dates.length ? ` · ${dates[0]} → ${dates[dates.length - 1]}` : ""}
           {mapping ? ` · ${mapping.sheet}` : ""}
         </p>
+        {workbookPath ? (
+          <p className="mt-1 break-all text-[11px] text-faint" title={workbookPath}>
+            {workbookPath}
+          </p>
+        ) : null}
         <div className="mt-3 flex flex-wrap gap-2">
           <Button variant="secondary" onClick={() => void openWorkbook()}>
             <FileSpreadsheet className="size-4" />
@@ -280,7 +395,7 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
           className="hidden"
           onChange={(event) => {
             const file = event.target.files?.[0];
-            if (file) void ingestFile(file);
+            if (file) void file.arrayBuffer().then((data) => importWorkbook(file.name, data));
             event.target.value = "";
           }}
         />
@@ -418,12 +533,56 @@ export function CommandDeck({ assets }: { assets: LoadedAssets | null }) {
         </div>
       ) : null}
 
+      <div className="rounded-[var(--radius-md)] border border-border p-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-sm text-fg">Versions to render</p>
+          <p className="text-xs text-muted">{cutCount} per sign</p>
+        </div>
+        <div className="grid grid-cols-2 gap-1">
+          {CUTS.map((cut) => (
+            <label key={cut.id} className="flex items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-sm text-muted hover:bg-surface-2">
+              <input
+                type="checkbox"
+                aria-label={`Render ${cut.label}`}
+                checked={enabledCuts[cut.id]}
+                onChange={(event) => useStudio.getState().setCut(cut.id, event.target.checked)}
+                className="size-4 shrink-0 accent-gilt"
+              />
+              <span className={enabledCuts[cut.id] ? "text-fg" : undefined}>{cut.label}</span>
+              <span className="ml-auto text-[11px] tabular-nums text-faint">{cut.targetSec}s</span>
+            </label>
+          ))}
+        </div>
+        <p className="mb-1 mt-3 text-xs text-faint">Preview</p>
+        <div className="grid grid-cols-4 gap-1">
+          {CUTS.map((cut) => (
+            <button
+              key={cut.id}
+              type="button"
+              aria-pressed={previewCut === cut.id}
+              onClick={() => useStudio.getState().setPreviewCut(cut.id)}
+              className={cn(
+                "rounded-[var(--radius-md)] border px-2 py-1.5 text-xs",
+                previewCut === cut.id ? "border-gilt bg-surface-2 text-fg" : "border-border text-muted hover:text-fg",
+              )}
+            >
+              {cut.label}
+            </button>
+          ))}
+        </div>
+        {previewCut !== "full" ? (
+          <p className="mt-2 text-[11px] leading-relaxed text-faint">
+            Shorts show the intro and one section. The astrology note goes into the post description.
+          </p>
+        ) : null}
+      </div>
+
       <div className="grid grid-cols-1 gap-2">
-        <Button disabled={!item || batch.running} onClick={() => void renderSelection(false)}>
-          Render {item?.channel ?? "this sign"}
+        <Button disabled={!item || !cutCount || batch.running} onClick={() => void renderSelection(false)}>
+          Render {item?.channel ?? "this sign"} · {cutCount} video{cutCount === 1 ? "" : "s"}
         </Button>
-        <Button variant="secondary" disabled={!date || !enabled.length || batch.running} onClick={() => void renderSelection(true)}>
-          Render all {enabled.length} enabled signs for {date || "this date"}
+        <Button variant="secondary" disabled={!date || !enabled.length || !cutCount || batch.running} onClick={() => void renderSelection(true)}>
+          Render {enabled.length} signs for {date || "this date"} · {enabled.length * cutCount} videos
         </Button>
         {typeof window !== "undefined" && window.aetherDesktop ? (
           <Button variant="ghost" onClick={() => void window.aetherDesktop?.openOutputFolder(date)}>

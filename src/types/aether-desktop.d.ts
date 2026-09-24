@@ -11,6 +11,8 @@ export interface AetherDesktopApi {
   createDesktopShortcut: () => Promise<boolean>;
   openWorkbook: () => Promise<{ name: string; path: string; bytes: Uint8Array } | null>;
   saveWorkbook: (path: string | null, bytes: Uint8Array) => Promise<{ path: string }>;
+  importWorkbook?: (name: string, bytes: Uint8Array) => Promise<{ name: string; path: string }>;
+  readWorkbook?: (path: string) => Promise<{ name: string; path: string; bytes: Uint8Array } | null>;
   saveConfig: (name: string, data: unknown) => Promise<void>;
   loadConfig: (name: string) => Promise<unknown | null>;
 }
